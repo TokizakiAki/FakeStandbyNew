@@ -7,16 +7,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 data class AppConfig(
-    val delaySeconds: Int = 0, // Instant by default, or configurable
-    val fiveFingerWake: Boolean = true,
+    val delaySeconds: Int = 0,
+    val fourFingerWake: Boolean = true,
     val powerKeyWake: Boolean = true,
     val emergencyTapWake: Boolean = true,
     val hapticFeedback: Boolean = true,
     val cpuWakeLock: Boolean = true,
     val oledPureBlack: Boolean = true,
     val autoStartOnBoot: Boolean = false,
-    val timerEnabled: Boolean = false, // Timer switch
-    val timerMinutes: Int = 120 // 1-12 hours in 30-min steps (60 to 720 mins)
+    val timerEnabled: Boolean = false,
+    val timerMinutes: Int = 120
 )
 
 class PreferencesManager(context: Context) {
@@ -27,9 +27,15 @@ class PreferencesManager(context: Context) {
     val config: StateFlow<AppConfig> = _config.asStateFlow()
 
     private fun loadConfig(): AppConfig {
+        val wakeVal = if (prefs.contains(KEY_FOUR_FINGER_WAKE)) {
+            prefs.getBoolean(KEY_FOUR_FINGER_WAKE, true)
+        } else {
+            prefs.getBoolean("five_finger_wake", true)
+        }
+
         return AppConfig(
             delaySeconds = prefs.getInt(KEY_DELAY_SECONDS, 0),
-            fiveFingerWake = prefs.getBoolean(KEY_FIVE_FINGER_WAKE, true),
+            fourFingerWake = wakeVal,
             powerKeyWake = prefs.getBoolean(KEY_POWER_KEY_WAKE, true),
             emergencyTapWake = prefs.getBoolean(KEY_EMERGENCY_TAP_WAKE, true),
             hapticFeedback = prefs.getBoolean(KEY_HAPTIC_FEEDBACK, true),
@@ -46,9 +52,9 @@ class PreferencesManager(context: Context) {
         _config.value = _config.value.copy(delaySeconds = seconds)
     }
 
-    fun setFiveFingerWake(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_FIVE_FINGER_WAKE, enabled).apply()
-        _config.value = _config.value.copy(fiveFingerWake = enabled)
+    fun setFourFingerWake(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_FOUR_FINGER_WAKE, enabled).apply()
+        _config.value = _config.value.copy(fourFingerWake = enabled)
     }
 
     fun setPowerKeyWake(enabled: Boolean) {
@@ -93,7 +99,7 @@ class PreferencesManager(context: Context) {
 
     companion object {
         private const val KEY_DELAY_SECONDS = "delay_seconds"
-        private const val KEY_FIVE_FINGER_WAKE = "five_finger_wake"
+        private const val KEY_FOUR_FINGER_WAKE = "four_finger_wake"
         private const val KEY_POWER_KEY_WAKE = "power_key_wake"
         private const val KEY_EMERGENCY_TAP_WAKE = "emergency_tap_wake"
         private const val KEY_HAPTIC_FEEDBACK = "haptic_feedback"

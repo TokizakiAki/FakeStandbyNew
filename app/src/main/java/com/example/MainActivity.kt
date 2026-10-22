@@ -241,7 +241,7 @@ fun FakeStandbyMainScreen() {
             item(key = "wakeup_card") {
                 WakeUpSettingsSection(
                     config = config,
-                    onUpdateFiveFinger = { prefsManager.setFiveFingerWake(it) },
+                    onUpdateFourFinger = { prefsManager.setFourFingerWake(it) },
                     onUpdatePowerKey = { prefsManager.setPowerKeyWake(it) },
                     onUpdateEmergencyTap = { prefsManager.setEmergencyTapWake(it) },
                     onUpdateHaptic = { prefsManager.setHapticFeedback(it) }
@@ -256,6 +256,20 @@ fun FakeStandbyMainScreen() {
                     onUpdateCpuLock = { prefsManager.setCpuWakeLock(it) },
                     onUpdateOledPureBlack = { prefsManager.setOledPureBlack(it) },
                     onUpdateAutoBoot = { prefsManager.setAutoStartOnBoot(it) }
+                )
+            }
+
+            // Open Source Acknowledgment
+            item(key = "acknowledgment_card") {
+                OpenSourceAcknowledgmentCard(
+                    onOpenProject = {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/JonasBernard/FakeStandby"))
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "无法打开浏览器: https://github.com/JonasBernard/FakeStandby", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 )
             }
 
@@ -665,7 +679,7 @@ fun PermissionItemRow(
 @Composable
 fun WakeUpSettingsSection(
     config: com.example.data.AppConfig,
-    onUpdateFiveFinger: (Boolean) -> Unit,
+    onUpdateFourFinger: (Boolean) -> Unit,
     onUpdatePowerKey: (Boolean) -> Unit,
     onUpdateEmergencyTap: (Boolean) -> Unit,
     onUpdateHaptic: (Boolean) -> Unit
@@ -700,16 +714,16 @@ fun WakeUpSettingsSection(
 
             SettingToggleRow(
                 icon = Icons.Default.TouchApp,
-                title = "五指触摸唤醒",
-                desc = "息屏期间所有触控完全阻断。任意五根手指同时贴在屏幕上即可解锁，防止误触游戏。",
-                checked = config.fiveFingerWake,
-                onCheckedChange = onUpdateFiveFinger
+                title = "四指触摸唤醒",
+                desc = "息屏期间所有触控完全阻断。任意四根手指同时贴在屏幕上即可解锁，符合人体工程学，防止误触游戏。",
+                checked = config.fourFingerWake,
+                onCheckedChange = onUpdateFourFinger
             )
 
             SettingToggleRow(
                 icon = Icons.Default.PowerSettingsNew,
                 title = "锁屏键 / 电源键开启",
-                desc = "按下机身侧边电源/锁屏键时立即退出挂机并恢复常规屏幕。与五指触摸并列生效、互不干扰。",
+                desc = "按下机身侧边电源/锁屏键时立即退出挂机并恢复常规屏幕。与四指触摸并列生效、互不干扰。",
                 checked = config.powerKeyWake,
                 onCheckedChange = onUpdatePowerKey
             )
@@ -878,6 +892,74 @@ fun SettingToggleRow(
                 checkedTrackColor = MaterialTheme.colorScheme.primary
             )
         )
+    }
+}
+
+@Composable
+fun OpenSourceAcknowledgmentCard(onOpenProject: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { onOpenProject() }
+            .testTag("acknowledgment_card"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Security,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "开源致谢 · 致敬原作者",
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                )
+                Text(
+                    text = "基于 JonasBernard/FakeStandby 开源项目",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 12.sp
+                    )
+                )
+                Text(
+                    text = "点击在默认浏览器中打开原项目主页",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        fontSize = 11.sp
+                    )
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.DirectionsRun,
+                contentDescription = "Open link",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp)
+            )
+        }
     }
 }
 

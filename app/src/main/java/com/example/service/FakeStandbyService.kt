@@ -313,9 +313,9 @@ class FakeStandbyService : Service() {
     private fun handleStandbyTouchEvent(event: MotionEvent) {
         val config = prefsManager.config.value
 
-        // Method 1: Five-finger touch wake (五指触摸唤醒)
-        if (config.fiveFingerWake && event.pointerCount >= 5) {
-            triggerWakeUp("五指触控唤醒成功")
+        // Method 1: Four-finger touch wake (四指触摸唤醒)
+        if (config.fourFingerWake && event.pointerCount >= 4) {
+            triggerWakeUp("四指触控唤醒成功")
             return
         }
 
@@ -462,7 +462,7 @@ class FakeStandbyService : Service() {
             else -> getString(R.string.notification_ready_title)
         }
 
-        val content = if (isStandby) "状态栏已收起，亮度已降至最低。五指触摸或按锁屏键恢复"
+        val content = if (isStandby) "状态栏已收起，亮度已降至最低。四指触摸或按锁屏键恢复"
         else if (countingDown) "倒计时结束将隐藏状态栏并覆盖全黑，阻断误触"
         else getString(R.string.notification_ready_content)
 

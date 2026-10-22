@@ -24,7 +24,7 @@ class ExampleRobolectricTest {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val prefs = com.example.data.PreferencesManager.getInstance(context)
     val config = prefs.config.value
-    assertEquals(true, config.fiveFingerWake)
+    assertEquals(true, config.fourFingerWake)
     assertEquals(true, config.powerKeyWake)
     assertEquals(true, config.oledPureBlack)
     assertEquals(false, config.timerEnabled)
