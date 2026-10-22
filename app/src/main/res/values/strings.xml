@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">FakeStandby</string>
+    <string name="tile_name">息屏挂机</string>
+    <string name="tile_desc">一键息屏挂机省电</string>
+    <string name="notification_channel_name">息屏挂机运行状态</string>
+    <string name="notification_channel_desc">用于保持息屏挂机服务运行与快捷退出</string>
+    <string name="notification_title">息屏挂机运行中</string>
+    <string name="notification_content">正在伪息屏省电运行，五指触摸屏幕或按下锁屏键可解锁</string>
+    <string name="notification_action_stop">退出息屏</string>
+    <string name="notification_action_start">立即息屏</string>
+    <string name="notification_ready_title">FakeStandby 后台待命</string>
+    <string name="notification_ready_content">点击下拉通知或快捷磁贴即可进入息屏挂机</string>
+    <string name="accessibility_service_desc">用于在点击快捷磁贴时自动模拟返回键，收起控制中心并防止游戏触发画中画或窗口化。</string>
+</resources>
