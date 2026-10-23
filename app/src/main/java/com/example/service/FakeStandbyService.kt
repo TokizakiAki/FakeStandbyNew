@@ -12,13 +12,20 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.AudioPlaybackConfiguration
 import android.os.Build
 import android.os.CountDownTimer
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.os.VibrationEffect
+import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
 import android.util.Log
@@ -41,15 +48,17 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 class FakeStandbyService : Service() {
-
     private lateinit var windowManager: WindowManager
     private lateinit var prefsManager: PreferencesManager
+    private lateinit var audioManager: AudioManager
     private var overlayView: View? = null
     private var countdownOverlayView: View? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var powerKeyReceiver: BroadcastReceiver? = null
     private var countDownTimer: CountDownTimer? = null
     private var lockTimer: CountDownTimer? = null
+    private var audioPlaybackCallback: AudioManager.AudioPlaybackCallback? = null
+    private var audioModeListener: AudioManager.OnModeChangedListener? = null
 
     // Touch gesture tracking for emergency wake
     private var tapCount = 0
@@ -59,6 +68,7 @@ class FakeStandbyService : Service() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         prefsManager = PreferencesManager.getInstance(this)
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         createNotificationChannel()
     }
 
@@ -80,8 +90,6 @@ class FakeStandbyService : Service() {
                 initiateStandby()
             }
         }
-
-        // Return START_NOT_STICKY: When idle, process smoothly enters Android cached state
         return START_NOT_STICKY
     }
 
@@ -99,7 +107,20 @@ class FakeStandbyService : Service() {
         val config = prefsManager.config.value
         val delay = config.delaySeconds
 
-        startForeground(NOTIFICATION_ID, buildNotification(isStandby = false, countingDown = delay > 0, remainingMillis = null))
+        val notification = buildNotification(isStandby = false, countingDown = delay > 0, remainingMillis = null)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "startForeground error", e)
+        }
 
         if (delay > 0) {
             startCountdown(delay)
@@ -120,14 +141,18 @@ class FakeStandbyService : Service() {
 
         val textView = TextView(this).apply {
             setTextColor(Color.WHITE)
-            textSize = 22f
+            textSize = 20f
             gravity = Gravity.CENTER
             text = "将在 $seconds 秒后进入息屏挂机\n点击屏幕任意位置可取消"
         }
 
         countdownView.addView(
             textView,
-            FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER
+            )
         )
 
         countdownView.setOnClickListener {
@@ -176,7 +201,7 @@ class FakeStandbyService : Service() {
             try {
                 windowManager.removeView(it)
             } catch (e: Exception) {
-                Log.e(TAG, "Error removing countdown overlay", e)
+                Log.e(TAG, "Error removing countdownView", e)
             }
             countdownOverlayView = null
         }
@@ -185,121 +210,115 @@ class FakeStandbyService : Service() {
     @SuppressLint("ClickableViewAccessibility")
     private fun activateOverlay() {
         removeOverlay()
-
         val config = prefsManager.config.value
 
         // Acquire WakeLock if enabled
         if (config.cpuWakeLock) {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "FakeStandby:GameAfkLock").apply {
-                setReferenceCounted(false)
-                acquire(24 * 60 * 60 * 1000L)
+            wakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "FakeStandby:OverlayWakeLock"
+            ).apply {
+                acquire(12 * 60 * 60 * 1000L) // 12 hours max safety
             }
         }
 
-        // Register power button / lock key receiver
+        // Register power key receiver
         if (config.powerKeyWake) {
             registerPowerKeyReceiver()
         }
 
-        // Create AMOLED Black Overlay View
-        val blackView = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
-            isFocusable = true
-            isFocusableInTouchMode = true
-            fitsSystemWindows = false
+        // Register non-intrusive AudioPlaybackCallback & AudioModeListener for incoming calls
+        if (config.callWake) {
+            registerCallAudioListener()
         }
 
-        // Hide Android Status Bar, Navigation Bar, and 3-Button Nav
-        blackView.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-            override fun onViewAttachedToWindow(v: View) {
-                hideSystemBars(v)
-            }
-            override fun onViewDetachedFromWindow(v: View) {}
-        })
+        val blackOverlay = FrameLayout(this).apply {
+            setBackgroundColor(if (config.oledPureBlack) Color.BLACK else 0xFF050505.toInt())
+            isFocusable = true
+            isClickable = true
+            isFocusableInTouchMode = true
+        }
 
-        // Intercept all touches: underlying game cannot receive any clicks
-        blackView.setOnTouchListener { _, event ->
+        blackOverlay.setOnTouchListener { _, event ->
             handleStandbyTouchEvent(event)
             true
         }
 
-        val overlayParams = WindowManager.LayoutParams(
+        val layoutParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_FULLSCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                    WindowManager.LayoutParams.FLAG_FULLSCREEN or
                     WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
-            PixelFormat.OPAQUE
+            PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-            screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF // Minimum backlight
+            screenBrightness = 0.001f // Turn backlight down to minimum
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
         }
 
         try {
-            windowManager.addView(blackView, overlayParams)
-            overlayView = blackView
+            windowManager.addView(blackOverlay, layoutParams)
+            overlayView = blackOverlay
             _isStandbyActive.value = true
 
-            // Hide system bars. Note: Back simulation is ONLY performed by FakeStandbyTileService,
-            // NOT here, so in-app toggle never triggers the back key!
-            hideSystemBars(blackView)
-
-            // Start Timer if enabled (1-12 hours in 30-min steps)
-            if (config.timerEnabled && config.timerMinutes > 0) {
-                startLockTimer(config.timerMinutes)
+            // Hide system status bar and navigation bar completely
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                blackOverlay.windowInsetsController?.let { controller ->
+                    controller.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+                    controller.systemBarsBehavior =
+                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
             } else {
-                updateNotificationState(remainingMillis = null)
+                @Suppress("DEPRECATION")
+                blackOverlay.systemUiVisibility = (
+                        View.SYSTEM_UI_FLAG_FULLSCREEN
+                                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        )
             }
 
-            // Haptic feedback
             if (config.hapticFeedback) {
                 performHapticPulse(short = true)
             }
+
+            // Start auto lock timer if enabled
+            if (config.timerEnabled && config.timerMinutes > 0) {
+                startAutoLockTimer(config.timerMinutes)
+            } else {
+                updateNotificationState(null)
+            }
+
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to attach standby overlay", e)
-            Toast.makeText(this, "悬浮窗加载失败: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+            Log.e(TAG, "Error displaying standby overlay", e)
             stopStandby()
             stopSelf()
         }
     }
 
-    private fun hideSystemBars(view: View) {
-        view.windowInsetsController?.let { controller ->
-            controller.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
-            controller.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
-    }
-
-    private fun startLockTimer(minutes: Int) {
-        lockTimer?.cancel()
+    private fun startAutoLockTimer(minutes: Int) {
         val totalMillis = minutes * 60 * 1000L
-
-        updateNotificationState(remainingMillis = totalMillis)
+        updateNotificationState(totalMillis)
 
         lockTimer = object : CountDownTimer(totalMillis, 60000L) {
             override fun onTick(millisUntilFinished: Long) {
-                updateNotificationState(remainingMillis = millisUntilFinished)
+                updateNotificationState(millisUntilFinished)
             }
 
             override fun onFinish() {
-                handleTimerLock()
+                triggerAutoLock()
             }
         }.start()
     }
 
-    private fun handleTimerLock() {
-        Log.d(TAG, "Lock timer finished: locking phone screen")
-        Toast.makeText(applicationContext, "定时挂机结束，正在锁定手机", Toast.LENGTH_LONG).show()
-
+    private fun triggerAutoLock() {
         stopStandby()
-
         val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val adminComponent = ComponentName(this, FakeStandbyAdminReceiver::class.java)
-
         if (dpm.isAdminActive(adminComponent)) {
             try {
                 dpm.lockNow()
@@ -313,7 +332,7 @@ class FakeStandbyService : Service() {
     private fun handleStandbyTouchEvent(event: MotionEvent) {
         val config = prefsManager.config.value
 
-        // Method 1: Four-finger touch wake (四指触摸唤醒)
+        // Method 1: Four-finger touch wake
         if (config.fourFingerWake && event.pointerCount >= 4) {
             triggerWakeUp("四指触控唤醒成功")
             return
@@ -347,7 +366,6 @@ class FakeStandbyService : Service() {
 
     private fun registerPowerKeyReceiver() {
         if (powerKeyReceiver != null) return
-
         powerKeyReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 when (intent?.action) {
@@ -358,12 +376,10 @@ class FakeStandbyService : Service() {
                 }
             }
         }
-
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_USER_PRESENT)
         }
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(powerKeyReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
@@ -382,16 +398,95 @@ class FakeStandbyService : Service() {
         }
     }
 
+    private fun registerCallAudioListener() {
+        if (audioPlaybackCallback != null) return
+        try {
+            audioPlaybackCallback = object : AudioManager.AudioPlaybackCallback() {
+                override fun onPlaybackConfigChanged(configs: List<AudioPlaybackConfiguration>) {
+                    super.onPlaybackConfigChanged(configs)
+                    if (!prefsManager.config.value.callWake) return
+
+                    for (config in configs) {
+                        val usage = config.audioAttributes.usage
+                        // Match incoming phone ringtone, VoIP voice communication, or signaling
+                        val isCallUsage = usage == AudioAttributes.USAGE_NOTIFICATION_RINGTONE ||
+                                usage == AudioAttributes.USAGE_VOICE_COMMUNICATION ||
+                                usage == AudioAttributes.USAGE_VOICE_COMMUNICATION_SIGNALLING
+
+                        if (isCallUsage) {
+                            Log.i(TAG, "Call audio active detected (usage=$usage), waking screen")
+                            triggerWakeUp("检测到通话接入，已自动恢复屏幕")
+                            return
+                        }
+                    }
+                }
+            }
+            audioManager.registerAudioPlaybackCallback(
+                audioPlaybackCallback!!,
+                Handler(Looper.getMainLooper())
+            )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                audioModeListener = AudioManager.OnModeChangedListener { mode ->
+                    if (prefsManager.config.value.callWake) {
+                        if (mode == AudioManager.MODE_RINGTONE ||
+                            mode == AudioManager.MODE_IN_COMMUNICATION ||
+                            mode == AudioManager.MODE_IN_CALL ||
+                            mode == AudioManager.MODE_CALL_SCREENING
+                        ) {
+                            Log.i(TAG, "Audio mode changed to in-call/ringtone (mode=$mode), waking screen")
+                            triggerWakeUp("检测到通话接入，已自动恢复屏幕")
+                        }
+                    }
+                }
+                audioManager.addOnModeChangedListener(mainExecutor, audioModeListener!!)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error registering call audio listener", e)
+        }
+    }
+
+    private fun unregisterCallAudioListener() {
+        audioPlaybackCallback?.let {
+            try {
+                audioManager.unregisterAudioPlaybackCallback(it)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error unregistering AudioPlaybackCallback", e)
+            }
+            audioPlaybackCallback = null
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            audioModeListener?.let {
+                try {
+                    audioManager.removeOnModeChangedListener(it)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error removing OnModeChangedListener", e)
+                }
+                audioModeListener = null
+            }
+        }
+    }
+
     private fun performHapticPulse(short: Boolean) {
         try {
-            val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
-            val vibrator = vibratorManager.defaultVibrator
-            if (short) {
-                vibrator.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                val vibrator = vibratorManager.defaultVibrator
+                if (short) {
+                    vibrator.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
+                } else {
+                    val timings = longArrayOf(0, 70, 70, 100)
+                    val amplitudes = intArrayOf(0, 200, 0, 255)
+                    vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
+                }
             } else {
-                val timings = longArrayOf(0, 70, 70, 100)
-                val amplitudes = intArrayOf(0, 200, 0, 255)
-                vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
+                @Suppress("DEPRECATION")
+                val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                if (short) {
+                    vibrator.vibrate(40)
+                } else {
+                    vibrator.vibrate(longArrayOf(0, 70, 70, 100), -1)
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Haptic vibration failed", e)
@@ -410,10 +505,9 @@ class FakeStandbyService : Service() {
         cancelCountdown()
         lockTimer?.cancel()
         lockTimer = null
-
         removeOverlay()
         unregisterPowerKeyReceiver()
-
+        unregisterCallAudioListener()
         wakeLock?.let {
             if (it.isHeld) {
                 try {
@@ -424,7 +518,6 @@ class FakeStandbyService : Service() {
             }
             wakeLock = null
         }
-
         _isStandbyActive.value = false
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
@@ -442,10 +535,19 @@ class FakeStandbyService : Service() {
 
     private fun buildNotification(isStandby: Boolean, countingDown: Boolean, remainingMillis: Long?): Notification {
         val stopIntent = Intent(this, FakeStandbyService::class.java).apply { action = ACTION_STOP }
-        val stopPendingIntent = PendingIntent.getService(this, 101, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            101,
+            stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         val appIntent = Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP }
-        val appPendingIntent = PendingIntent.getActivity(this, 102, appIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val appPendingIntent = PendingIntent.getActivity(
+            this,
+            102,
+            appIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
         val title = when {
             isStandby -> {
@@ -462,8 +564,8 @@ class FakeStandbyService : Service() {
             else -> getString(R.string.notification_ready_title)
         }
 
-        val content = if (isStandby) "状态栏已收起，亮度已降至最低。四指触摸或按锁屏键恢复"
-        else if (countingDown) "倒计时结束将隐藏状态栏并覆盖全黑，阻断误触"
+        val content = if (isStandby) "状态栏已通过无线ADB收起，屏幕发光已降至最低。四指触摸或按电源键恢复"
+        else if (countingDown) "倒计时结束将隐藏系统状态栏并覆盖全黑阻断误触"
         else getString(R.string.notification_ready_content)
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -476,7 +578,11 @@ class FakeStandbyService : Service() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
         if (isStandby || countingDown) {
-            builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, getString(R.string.notification_action_stop), stopPendingIntent)
+            builder.addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                getString(R.string.notification_action_stop),
+                stopPendingIntent
+            )
         }
 
         return builder.build()
@@ -507,6 +613,7 @@ class FakeStandbyService : Service() {
         const val ACTION_START = "com.example.action.START_STANDBY"
         const val ACTION_STOP = "com.example.action.STOP_STANDBY"
         const val ACTION_TOGGLE = "com.example.action.TOGGLE_STANDBY"
+
         private const val NOTIFICATION_ID = 20261
         private const val CHANNEL_ID = "fake_standby_running_channel"
 
@@ -515,7 +622,11 @@ class FakeStandbyService : Service() {
 
         fun start(context: Context) {
             val intent = Intent(context, FakeStandbyService::class.java).apply { action = ACTION_START }
-            context.startForegroundService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
         }
 
         fun stop(context: Context) {

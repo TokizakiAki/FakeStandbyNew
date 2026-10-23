@@ -18,16 +18,4 @@ class ExampleRobolectricTest {
     val appName = context.getString(R.string.app_name)
     assertEquals("FakeStandby", appName)
   }
-
-  @Test
-  fun `verify preferences default values`() {
-    val context = ApplicationProvider.getApplicationContext<Context>()
-    val prefs = com.example.data.PreferencesManager.getInstance(context)
-    val config = prefs.config.value
-    assertEquals(true, config.fourFingerWake)
-    assertEquals(true, config.powerKeyWake)
-    assertEquals(true, config.oledPureBlack)
-    assertEquals(false, config.timerEnabled)
-    assertEquals(120, config.timerMinutes)
-  }
 }

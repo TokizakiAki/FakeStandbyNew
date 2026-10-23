@@ -2,7 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Essential permissions for FakeStandby on Android 14+ / 17 -->
+    <!-- Network permissions for local Wireless ADB communication and mDNS -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
+    <!-- Standby Overlay & Foreground permissions -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -34,7 +40,6 @@
             </intent-filter>
         </activity>
 
-
         <!-- Foreground Service controlling the black standby overlay -->
         <service
             android:name=".service.FakeStandbyService"
@@ -44,6 +49,17 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Full-screen AMOLED power-saving overlay for AFK gaming." />
+        </service>
+
+        <!-- Foreground Service for Wireless ADB pairing & notification inline reply -->
+        <service
+            android:name=".service.AdbPairingService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Wireless ADB mDNS pairing and notification reply." />
         </service>
 
         <!-- Quick Settings Tile Service -->
@@ -59,20 +75,7 @@
             </intent-filter>
         </service>
 
-        <!-- Accessibility Service to simulate Back button when tile is tapped -->
-        <service
-            android:name=".service.FakeStandbyAccessibilityService"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service_config" />
-        </service>
-
-        <!-- Device Admin receiver for auto-locking phone on timer expiry -->
+        <!-- Device Admin receiver for optional auto-locking phone on timer expiry -->
         <receiver
             android:name=".receiver.FakeStandbyAdminReceiver"
             android:permission="android.permission.BIND_DEVICE_ADMIN"

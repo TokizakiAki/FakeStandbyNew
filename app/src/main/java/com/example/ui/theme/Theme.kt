@@ -1,6 +1,5 @@
 package com.example.ui.theme
 
-import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -9,56 +8,52 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
-import androidx.core.view.WindowCompat
 
+// Standard Material Design 3 solid color fallback schemes
 private val DarkColorScheme = darkColorScheme(
-    primary = md_theme_dark_primary,
-    onPrimary = md_theme_dark_onPrimary,
-    primaryContainer = md_theme_dark_primaryContainer,
-    onPrimaryContainer = md_theme_dark_onPrimaryContainer,
-    secondary = md_theme_dark_secondary,
-    onSecondary = md_theme_dark_onSecondary,
-    secondaryContainer = md_theme_dark_secondaryContainer,
-    onSecondaryContainer = md_theme_dark_onSecondaryContainer,
-    tertiary = md_theme_dark_tertiary,
-    onTertiary = md_theme_dark_onTertiary,
-    tertiaryContainer = md_theme_dark_tertiaryContainer,
-    onTertiaryContainer = md_theme_dark_onTertiaryContainer,
-    background = md_theme_dark_background,
-    onBackground = md_theme_dark_onBackground,
-    surface = md_theme_dark_surface,
-    onSurface = md_theme_dark_onSurface,
-    surfaceVariant = md_theme_dark_surfaceVariant,
-    onSurfaceVariant = md_theme_dark_onSurfaceVariant,
-    outline = md_theme_dark_outline,
-    error = md_error_dark
+    primary = Color(0xFF67D8FF),
+    onPrimary = Color(0xFF003547),
+    primaryContainer = Color(0xFF004D66),
+    onPrimaryContainer = Color(0xFFBFE9FF),
+    secondary = Color(0xFFB4CAD6),
+    onSecondary = Color(0xFF1E333D),
+    secondaryContainer = Color(0xFF354A54),
+    onSecondaryContainer = Color(0xFFD0E6F2),
+    tertiary = Color(0xFFC7C2EA),
+    onTertiary = Color(0xFF302C4C),
+    background = Color(0xFF0E1418),
+    onBackground = Color(0xFFDEE3E7),
+    surface = Color(0xFF161C21),
+    onSurface = Color(0xFFDEE3E7),
+    surfaceVariant = Color(0xFF222930),
+    onSurfaceVariant = Color(0xFFC0C8CD),
+    outline = Color(0xFF8A9297),
+    error = Color(0xFFFFB4AB),
+    onError = Color(0xFF690005)
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = md_theme_light_primary,
-    onPrimary = md_theme_light_onPrimary,
-    primaryContainer = md_theme_light_primaryContainer,
-    onPrimaryContainer = md_theme_light_onPrimaryContainer,
-    secondary = md_theme_light_secondary,
-    onSecondary = md_theme_light_onSecondary,
-    secondaryContainer = md_theme_light_secondaryContainer,
-    onSecondaryContainer = md_theme_light_onSecondaryContainer,
-    tertiary = md_theme_light_tertiary,
-    onTertiary = md_theme_light_onTertiary,
-    tertiaryContainer = md_theme_light_tertiaryContainer,
-    onTertiaryContainer = md_theme_light_onTertiaryContainer,
-    background = md_theme_light_background,
-    onBackground = md_theme_light_onBackground,
-    surface = md_theme_light_surface,
-    onSurface = md_theme_light_onSurface,
-    surfaceVariant = md_theme_light_surfaceVariant,
-    onSurfaceVariant = md_theme_light_onSurfaceVariant,
-    outline = md_theme_light_outline,
-    error = md_error
+    primary = Color(0xFF006686),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFBFE9FF),
+    onPrimaryContainer = Color(0xFF001F2B),
+    secondary = Color(0xFF4C616C),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFD0E6F2),
+    onSecondaryContainer = Color(0xFF081E27),
+    tertiary = Color(0xFF5E5A7D),
+    onTertiary = Color(0xFFFFFFFF),
+    background = Color(0xFFFBFCFE),
+    onBackground = Color(0xFF191C1E),
+    surface = Color(0xFFF0F4F7),
+    onSurface = Color(0xFF191C1E),
+    surfaceVariant = Color(0xFFE2E9EE),
+    onSurfaceVariant = Color(0xFF40484C),
+    outline = Color(0xFF70787D),
+    error = Color(0xFFBA1A1A),
+    onError = Color(0xFFFFFFFF)
 )
 
 @Composable
@@ -74,23 +69,6 @@ fun FakeStandbyTheme(
         }
         darkTheme -> DarkColorScheme
         else -> LightColorScheme
-    }
-
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        SideEffect {
-            val window = (view.context as? Activity)?.window
-            if (window != null) {
-                // Keep status bar and navigation bar transparent, edge-to-edge
-                window.statusBarColor = android.graphics.Color.TRANSPARENT
-                window.navigationBarColor = android.graphics.Color.TRANSPARENT
-
-                // Accurately adjust status bar icon color (dark icons in light theme, light icons in dark theme)
-                val insetsController = WindowCompat.getInsetsController(window, view)
-                insetsController.isAppearanceLightStatusBars = !darkTheme
-                insetsController.isAppearanceLightNavigationBars = !darkTheme
-            }
-        }
     }
 
     MaterialTheme(

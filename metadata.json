@@ -1,6 +1,6 @@
 {
   "name": "FakeStandby",
-  "description": "专为游戏挂机设计的现代化息屏挂机工具，完美适配Android 17与三星OneUI，支持快捷设置磁贴、五指触摸与锁屏键双唤醒及后台保活。",
+  "description": "OLED screen standby for AFK gaming with wireless ADB notification pairing and quick settings tile.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -16,7 +16,10 @@ data class AppConfig(
     val oledPureBlack: Boolean = true,
     val autoStartOnBoot: Boolean = false,
     val timerEnabled: Boolean = false,
-    val timerMinutes: Int = 120
+    val timerMinutes: Int = 120,
+    val adbPaired: Boolean = false,
+    val adbConnectPort: Int = 0,
+    val callWake: Boolean = true
 )
 
 class PreferencesManager(context: Context) {
@@ -43,8 +46,16 @@ class PreferencesManager(context: Context) {
             oledPureBlack = prefs.getBoolean(KEY_OLED_PURE_BLACK, true),
             autoStartOnBoot = prefs.getBoolean(KEY_AUTO_START_BOOT, false),
             timerEnabled = prefs.getBoolean(KEY_TIMER_ENABLED, false),
-            timerMinutes = prefs.getInt(KEY_TIMER_MINUTES, 120)
+            timerMinutes = prefs.getInt(KEY_TIMER_MINUTES, 120),
+            adbPaired = prefs.getBoolean(KEY_ADB_PAIRED, false),
+            adbConnectPort = prefs.getInt(KEY_ADB_CONNECT_PORT, 0),
+            callWake = prefs.getBoolean(KEY_CALL_WAKE, true)
         )
+    }
+
+    fun setCallWake(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_CALL_WAKE, enabled).apply()
+        _config.value = _config.value.copy(callWake = enabled)
     }
 
     fun setDelaySeconds(seconds: Int) {
@@ -97,6 +108,16 @@ class PreferencesManager(context: Context) {
         _config.value = _config.value.copy(timerMinutes = minutes)
     }
 
+    fun setAdbPaired(paired: Boolean) {
+        prefs.edit().putBoolean(KEY_ADB_PAIRED, paired).apply()
+        _config.value = _config.value.copy(adbPaired = paired)
+    }
+
+    fun setAdbConnectPort(port: Int) {
+        prefs.edit().putInt(KEY_ADB_CONNECT_PORT, port).apply()
+        _config.value = _config.value.copy(adbConnectPort = port)
+    }
+
     companion object {
         private const val KEY_DELAY_SECONDS = "delay_seconds"
         private const val KEY_FOUR_FINGER_WAKE = "four_finger_wake"
@@ -108,6 +129,9 @@ class PreferencesManager(context: Context) {
         private const val KEY_AUTO_START_BOOT = "auto_start_boot"
         private const val KEY_TIMER_ENABLED = "timer_enabled"
         private const val KEY_TIMER_MINUTES = "timer_minutes"
+        private const val KEY_ADB_PAIRED = "adb_paired"
+        private const val KEY_ADB_CONNECT_PORT = "adb_connect_port"
+        private const val KEY_CALL_WAKE = "call_wake"
 
         @Volatile
         private var instance: PreferencesManager? = null

@@ -12,6 +12,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -19,6 +20,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,29 +38,40 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryAlert
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -74,6 +87,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -81,25 +95,54 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.adb.AdbManager
+import com.example.data.AppConfig
 import com.example.data.PreferencesManager
 import com.example.receiver.FakeStandbyAdminReceiver
-import com.example.service.FakeStandbyAccessibilityService
+import com.example.service.AdbPairingService
 import com.example.service.FakeStandbyService
 import com.example.ui.theme.FakeStandbyTheme
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
         setContent {
-            FakeStandbyTheme {
+            val isDark = isSystemInDarkTheme()
+
+            // Dynamic status bar style according to Material Design 3 light/dark mode
+            DisposableEffect(isDark) {
+                enableEdgeToEdge(
+                    statusBarStyle = if (isDark) {
+                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT
+                        )
+                    },
+                    navigationBarStyle = if (isDark) {
+                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT
+                        )
+                    }
+                )
+                onDispose {}
+            }
+
+            FakeStandbyTheme(darkTheme = isDark) {
                 FakeStandbyMainScreen()
             }
         }
@@ -112,8 +155,16 @@ fun FakeStandbyMainScreen() {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val prefsManager = remember { PreferencesManager.getInstance(context) }
+    val adbManager = remember { AdbManager.getInstance(context) }
+
     val config by prefsManager.config.collectAsState()
     val isStandbyActive by FakeStandbyService.isStandbyActive.collectAsState()
+    val isAdbPaired by adbManager.isPaired.collectAsState()
+    val isAdbConnected by adbManager.isConnected.collectAsState()
+    val isSearchingPairing by adbManager.isSearchingPairing.collectAsState()
+    val discoveredPairingPort by adbManager.discoveredPairingPort.collectAsState()
+    val adbStatusMessage by adbManager.statusMessage.collectAsState()
+    val isDaemonAlive by adbManager.isDaemonAlive.collectAsState()
 
     var hasOverlayPermission by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
     var isBatteryIgnoring by remember {
@@ -121,9 +172,6 @@ fun FakeStandbyMainScreen() {
     }
     var isDeviceAdminActive by remember {
         mutableStateOf(isDeviceAdminEnabled(context))
-    }
-    var isAccessibilityActive by remember {
-        mutableStateOf(isAccessibilityEnabled(context))
     }
 
     val notificationLauncher = rememberLauncherForActivityResult(
@@ -136,7 +184,7 @@ fun FakeStandbyMainScreen() {
                 hasOverlayPermission = Settings.canDrawOverlays(context)
                 isBatteryIgnoring = valPowerManager(context).isIgnoringBatteryOptimizations(context.packageName)
                 isDeviceAdminActive = isDeviceAdminEnabled(context)
-                isAccessibilityActive = isAccessibilityEnabled(context)
+                adbManager.checkDaemonStatus()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -154,15 +202,15 @@ fun FakeStandbyMainScreen() {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
-                                .size(34.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.primary),
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.PowerSettingsNew,
                                 contentDescription = "Logo",
-                                tint = MaterialTheme.colorScheme.onPrimary,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -176,7 +224,9 @@ fun FakeStandbyMainScreen() {
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                ),
                 modifier = Modifier.statusBarsPadding()
             )
         }
@@ -189,11 +239,13 @@ fun FakeStandbyMainScreen() {
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Master Action Hero Card
+            // Master Action Hero Card (Modified: removed small text under button)
             item(key = "hero_card") {
                 MasterStatusHeroCard(
                     isStandbyActive = isStandbyActive,
                     hasOverlayPermission = hasOverlayPermission,
+                    isAdbPaired = isAdbPaired,
+                    isDaemonAlive = isDaemonAlive,
                     onToggleStandby = {
                         if (!hasOverlayPermission) {
                             requestOverlayPermission(context)
@@ -208,14 +260,57 @@ fun FakeStandbyMainScreen() {
                 )
             }
 
-            // Permissions Section
+            // Wireless ADB Section (Modified: with 1-click authorize, direct jump to wireless debugging, and offline Shell daemon)
+            item(key = "adb_wireless_card") {
+                WirelessAdbSection(
+                    isPaired = isAdbPaired,
+                    isConnected = isAdbConnected,
+                    isDaemonAlive = isDaemonAlive,
+                    isSearching = isSearchingPairing,
+                    discoveredPairingPort = discoveredPairingPort,
+                    statusMessage = adbStatusMessage,
+                    savedConnectPort = config.adbConnectPort,
+                    onStartPairingSearch = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                        AdbPairingService.startSearch(context)
+                    },
+                    onStopPairingSearch = {
+                        AdbPairingService.stopSearch(context)
+                    },
+                    onSubmitPairCode = { port, code ->
+                        adbManager.pair(port, code)
+                    },
+                    onAutoAuthorize = {
+                        val res = adbManager.autoAuthorize()
+                        if (res.isFailure) {
+                            Toast.makeText(context, res.exceptionOrNull()?.message ?: "获取授权失败", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onManualConnect = { port ->
+                        adbManager.connect(port)
+                    },
+                    onOpenWirelessSettings = {
+                        openWirelessDebuggingSettings(context)
+                    },
+                    onStartDaemon = {
+                        val ok = adbManager.startDaemonIfNecessary()
+                        if (ok) {
+                            Toast.makeText(context, "Shell保活服务已启动 (脱离Wi-Fi限制)", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "启动失败，请确保无线ADB已连接", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                )
+            }
+
+            // System Permissions Section (No accessibility)
             item(key = "permissions_card") {
                 PermissionStatusSection(
                     hasOverlayPermission = hasOverlayPermission,
                     isBatteryIgnoring = isBatteryIgnoring,
-                    isAccessibilityActive = isAccessibilityActive,
                     onRequestOverlay = { requestOverlayPermission(context) },
-                    onRequestAccessibility = { requestAccessibilityPermission(context) },
                     onRequestNotification = {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -225,7 +320,7 @@ fun FakeStandbyMainScreen() {
                 )
             }
 
-            // Timer Configuration Section (1-12 hours in 30-min steps)
+            // Timer Configuration Section (Modified: centered duration, removed label text)
             item(key = "timer_card") {
                 TimerSettingsSection(
                     timerEnabled = config.timerEnabled,
@@ -237,14 +332,15 @@ fun FakeStandbyMainScreen() {
                 )
             }
 
-            // Wake-Up Mechanisms Section
+            // Wake-Up Mechanisms Section (Modified: Added call incoming wake toggle)
             item(key = "wakeup_card") {
                 WakeUpSettingsSection(
                     config = config,
                     onUpdateFourFinger = { prefsManager.setFourFingerWake(it) },
                     onUpdatePowerKey = { prefsManager.setPowerKeyWake(it) },
                     onUpdateEmergencyTap = { prefsManager.setEmergencyTapWake(it) },
-                    onUpdateHaptic = { prefsManager.setHapticFeedback(it) }
+                    onUpdateHaptic = { prefsManager.setHapticFeedback(it) },
+                    onUpdateCallWake = { prefsManager.setCallWake(it) }
                 )
             }
 
@@ -259,22 +355,8 @@ fun FakeStandbyMainScreen() {
                 )
             }
 
-            // Open Source Acknowledgment
-            item(key = "acknowledgment_card") {
-                OpenSourceAcknowledgmentCard(
-                    onOpenProject = {
-                        try {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/JonasBernard/FakeStandby"))
-                            context.startActivity(intent)
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "无法打开浏览器: https://github.com/JonasBernard/FakeStandby", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                )
-            }
-
             item(key = "bottom_space") {
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }
@@ -284,19 +366,21 @@ fun FakeStandbyMainScreen() {
 fun MasterStatusHeroCard(
     isStandbyActive: Boolean,
     hasOverlayPermission: Boolean,
+    isAdbPaired: Boolean,
+    isDaemonAlive: Boolean = false,
     onToggleStandby: () -> Unit
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("hero_status_card"),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(18.dp),
+                .padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Row(
@@ -305,9 +389,9 @@ fun MasterStatusHeroCard(
                     .clip(CircleShape)
                     .background(
                         if (isStandbyActive) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.secondaryContainer
+                        else MaterialTheme.colorScheme.surface
                     )
-                    .padding(horizontal = 12.dp, vertical = 5.dp)
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
             ) {
                 Box(
                     modifier = Modifier
@@ -315,19 +399,22 @@ fun MasterStatusHeroCard(
                         .clip(CircleShape)
                         .background(
                             if (isStandbyActive) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.secondary
+                            else if (isDaemonAlive) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                         )
                 )
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = when {
                         !hasOverlayPermission -> "需要悬浮窗权限"
                         isStandbyActive -> "息屏挂机中 · 状态栏已隐藏"
-                        else -> "就绪待命"
+                        isDaemonAlive -> "Shell保活服务运行中 (免Wi-Fi) · 待命"
+                        isAdbPaired -> "无线 ADB 已就绪 · 待命"
+                        else -> "待命 (建议先配对无线调试)"
                     },
                     style = MaterialTheme.typography.labelMedium.copy(
                         color = if (isStandbyActive) MaterialTheme.colorScheme.onPrimaryContainer
-                        else MaterialTheme.colorScheme.onSecondaryContainer,
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold
                     )
                 )
@@ -336,22 +423,22 @@ fun MasterStatusHeroCard(
             Spacer(modifier = Modifier.height(14.dp))
 
             Text(
-                text = if (isStandbyActive) "息屏挂机中" else "一键息屏挂机",
-                style = MaterialTheme.typography.titleLarge.copy(
+                text = if (isStandbyActive) "息屏挂机中" else "一键开启息屏",
+                style = MaterialTheme.typography.headlineSmall.copy(
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             Button(
                 onClick = onToggleStandby,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
+                    .height(50.dp)
                     .testTag("toggle_standby_button"),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (isStandbyActive) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.primary,
@@ -360,9 +447,9 @@ fun MasterStatusHeroCard(
                 )
             ) {
                 Icon(
-                    imageVector = if (isStandbyActive) Icons.Default.Close else Icons.Default.PowerSettingsNew,
+                    imageVector = if (isStandbyActive) Icons.Default.Close else Icons.Default.PlayArrow,
                     contentDescription = null,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(22.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
@@ -372,6 +459,542 @@ fun MasterStatusHeroCard(
                         else -> "立即开启息屏挂机"
                     },
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun WirelessAdbSection(
+    isPaired: Boolean,
+    isConnected: Boolean,
+    isDaemonAlive: Boolean,
+    isSearching: Boolean,
+    discoveredPairingPort: Int?,
+    statusMessage: String,
+    savedConnectPort: Int,
+    onStartPairingSearch: () -> Unit,
+    onStopPairingSearch: () -> Unit,
+    onSubmitPairCode: suspend (port: Int, code: String) -> Unit,
+    onAutoAuthorize: suspend () -> Unit,
+    onManualConnect: suspend (port: Int) -> Unit,
+    onOpenWirelessSettings: () -> Unit,
+    onStartDaemon: suspend () -> Unit
+) {
+    val coroutineScope = rememberCoroutineScope()
+    var inputCode by remember { mutableStateOf("") }
+    val defaultPort = if (savedConnectPort > 0) savedConnectPort.toString() else "5555"
+    var customConnectPort by remember(savedConnectPort) { mutableStateOf(defaultPort) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("wireless_adb_section_card"),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isDaemonAlive || isConnected) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surface
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isDaemonAlive) Icons.Default.DirectionsRun else Icons.Default.Wifi,
+                        contentDescription = null,
+                        tint = if (isDaemonAlive || isConnected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "无线调试 ADB 权限",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    )
+                }
+
+                // Status Chip
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (isDaemonAlive) MaterialTheme.colorScheme.primaryContainer
+                            else if (isConnected) MaterialTheme.colorScheme.tertiaryContainer
+                            else if (isPaired) MaterialTheme.colorScheme.secondaryContainer
+                            else MaterialTheme.colorScheme.errorContainer
+                        )
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = when {
+                            isDaemonAlive -> "Shell保活运行中"
+                            isConnected -> "ADB已连接"
+                            isPaired -> "已配对"
+                            else -> "未授权"
+                        },
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = when {
+                                isDaemonAlive -> MaterialTheme.colorScheme.onPrimaryContainer
+                                isConnected -> MaterialTheme.colorScheme.onTertiaryContainer
+                                isPaired -> MaterialTheme.colorScheme.onSecondaryContainer
+                                else -> MaterialTheme.colorScheme.onErrorContainer
+                            },
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                }
+            }
+
+            // Command Box
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "adb shell cmd statusbar collapse",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = MaterialTheme.colorScheme.primary,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+            }
+
+            // Persistent Shell Daemon Banner (Shown when daemon is running offline)
+            AnimatedVisibility(visible = isDaemonAlive) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f))
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Shell保活已独立运行",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    )
+                }
+            }
+
+            // Status message
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "状态：$statusMessage",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 12.sp
+                    ),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            // Quick Action Buttons: Auto-Authorize & Direct Jump to Wireless Debugging Settings (Two rows layout)
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            onAutoAuthorize()
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .testTag("auto_authorize_adb_btn"),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "一键获取授权",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+
+                FilledTonalButton(
+                    onClick = onOpenWirelessSettings,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .testTag("open_wireless_debugging_btn"),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Default.PowerSettingsNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "一键直达无线调试",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+
+                if (!isDaemonAlive && isConnected) {
+                    FilledTonalButton(
+                        onClick = {
+                            coroutineScope.launch {
+                                onStartDaemon()
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("start_daemon_btn"),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.DirectionsRun, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("启动Shell保活", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                    }
+                }
+            }
+
+            // Wireless Debugging Guide (Cleaned instructions)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "无线调试指引：",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Text(
+                    text = "1. 点击「一键直达无线调试」开启无线调试 -> 点击「使用配对码配对设备」\n" +
+                            "2. 点击下方「开启自动搜索与通知配对」，在通知栏直接回复6位配对码即可",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp
+                    )
+                )
+            }
+
+            // Pairing Search button (For initial setup or re-pairing)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (!isSearching) {
+                    OutlinedButton(
+                        onClick = onStartPairingSearch,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .testTag("start_adb_pairing_search_btn"),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isPaired) "重新配对无线调试" else "开启自动搜索与通知配对",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = onStopPairingSearch,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .testTag("stop_adb_pairing_search_btn"),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("搜索端口中… 点击停止")
+                    }
+                }
+            }
+
+            // Inline pairing fallback if port is found
+            AnimatedVisibility(visible = discoveredPairingPort != null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "已发现配对端口: ${discoveredPairingPort ?: 0} (亦可在此直接输入)",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = inputCode,
+                            onValueChange = { if (it.length <= 6) inputCode = it },
+                            placeholder = { Text("6位配对码", fontSize = 12.sp) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                            )
+                        )
+                        Button(
+                            onClick = {
+                                val port = discoveredPairingPort ?: return@Button
+                                if (inputCode.isNotBlank()) {
+                                    coroutineScope.launch {
+                                        onSubmitPairCode(port, inputCode)
+                                    }
+                                }
+                            },
+                            enabled = inputCode.length >= 6,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("配对")
+                        }
+                    }
+                }
+            }
+
+            // Custom connect port fallback
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = customConnectPort,
+                    onValueChange = { customConnectPort = it },
+                    placeholder = { Text("端口(默认5555)", fontSize = 12.sp) },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                    )
+                )
+                OutlinedButton(
+                    onClick = {
+                        val port = customConnectPort.toIntOrNull() ?: 5555
+                        coroutineScope.launch {
+                            onManualConnect(port)
+                        }
+                    },
+                    modifier = Modifier.height(48.dp),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("直连端口", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PermissionStatusSection(
+    hasOverlayPermission: Boolean,
+    isBatteryIgnoring: Boolean,
+    onRequestOverlay: () -> Unit,
+    onRequestNotification: () -> Unit,
+    onRequestBatteryExemption: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Security,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "系统运行权限",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                )
+            }
+
+            PermissionItemRow(
+                title = "显示在其他应用上层 (悬浮窗)",
+                subtitle = "必需权限，用于在游戏上方显示纯黑屏并接管熄屏状态",
+                isGranted = hasOverlayPermission,
+                actionLabel = "去授权",
+                onClick = onRequestOverlay
+            )
+
+            PermissionItemRow(
+                title = "通知权限 (前台服务与配对回复)",
+                subtitle = "用于常驻状态退出挂机，以及在通知栏中直接回复配对码",
+                isGranted = true,
+                actionLabel = "检查",
+                onClick = onRequestNotification
+            )
+
+            PermissionItemRow(
+                title = "电池不受限制 (后台防杀)",
+                subtitle = "不用时符合规范自动进入系统缓存，挂机时不被省电策略杀掉",
+                isGranted = isBatteryIgnoring,
+                actionLabel = "去设置",
+                onClick = onRequestBatteryExemption
+            )
+        }
+    }
+}
+
+@Composable
+fun PermissionItemRow(
+    title: String,
+    subtitle: String,
+    isGranted: Boolean,
+    actionLabel: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(
+                    if (isGranted) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.errorContainer
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = if (isGranted) Icons.Default.Check else Icons.Default.Close,
+                contentDescription = null,
+                tint = if (isGranted) MaterialTheme.colorScheme.onPrimaryContainer
+                else MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.sp
+                )
+            )
+        }
+
+        if (!isGranted) {
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedButton(
+                onClick = onClick,
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                modifier = Modifier.height(32.dp)
+            ) {
+                Text(
+                    text = actionLabel,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
                 )
             }
         }
@@ -415,21 +1038,17 @@ fun TimerSettingsSection(
                         )
                     )
                     Text(
-                        text = if (timerEnabled) "已开启定时：达到指定时长后锁定手机"
-                        else "已关闭定时：无限时间息屏挂机，直到手动唤醒",
+                        text = if (timerEnabled) "达到指定时长后锁定手机"
+                        else "无限时间息屏挂机，直到手动唤醒",
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp
                         )
                     )
                 }
                 Switch(
                     checked = timerEnabled,
-                    onCheckedChange = onToggleTimer,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                        checkedTrackColor = MaterialTheme.colorScheme.primary
-                    )
+                    onCheckedChange = onToggleTimer
                 )
             }
 
@@ -439,33 +1058,22 @@ fun TimerSettingsSection(
                     val minutes = timerMinutes % 60
                     val durationText = if (minutes == 0) "$hours 小时" else "$hours 小时 $minutes 分钟"
 
+                    // Modified per modification 3: Centered duration, deleted "定时挂机时长" label
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.secondaryContainer)
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "定时挂机时长",
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    fontWeight = FontWeight.Medium
-                                )
+                        Text(
+                            text = "【$durationText (${timerMinutes}分钟)】",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
                             )
-                            Text(
-                                text = "$durationText (${timerMinutes}分钟)",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            )
-                        }
+                        )
                     }
 
                     var sliderPos by remember(timerMinutes) {
@@ -493,9 +1101,9 @@ fun TimerSettingsSection(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("1 小时", style = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)))
-                        Text("刻度: 30分钟", style = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)))
-                        Text("12 小时", style = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)))
+                        Text("1 小时", style = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant))
+                        Text("刻度: 30分钟", style = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant))
+                        Text("12 小时", style = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant))
                     }
 
                     if (!isDeviceAdminActive) {
@@ -530,159 +1138,13 @@ fun TimerSettingsSection(
 }
 
 @Composable
-fun PermissionStatusSection(
-    hasOverlayPermission: Boolean,
-    isBatteryIgnoring: Boolean,
-    isAccessibilityActive: Boolean,
-    onRequestOverlay: () -> Unit,
-    onRequestAccessibility: () -> Unit,
-    onRequestNotification: () -> Unit,
-    onRequestBatteryExemption: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Security,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = "系统权限与后台规范",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                )
-            }
-
-            PermissionItemRow(
-                title = "显示在其他应用上层 (悬浮窗)",
-                subtitle = "必需权限，用于在游戏上方显示纯黑屏并收起系统导航栏",
-                isGranted = hasOverlayPermission,
-                actionLabel = "去授权",
-                onClick = onRequestOverlay
-            )
-
-            PermissionItemRow(
-                title = "无障碍服务 (模拟返回键收起控制中心)",
-                subtitle = "仅点击磁贴时自动执行返回键收起控制中心，彻底杜绝画中画",
-                isGranted = isAccessibilityActive,
-                actionLabel = "去开启",
-                onClick = onRequestAccessibility
-            )
-
-            PermissionItemRow(
-                title = "电池不受限制 (后台防杀)",
-                subtitle = "不用时符合规范自动进入系统缓存，挂机时不被杀死",
-                isGranted = isBatteryIgnoring,
-                actionLabel = "去设置",
-                onClick = onRequestBatteryExemption
-            )
-
-            PermissionItemRow(
-                title = "通知权限 (前台服务)",
-                subtitle = "支持下拉通知栏随时退出挂机",
-                isGranted = true,
-                actionLabel = "检查",
-                onClick = onRequestNotification
-            )
-        }
-    }
-}
-
-@Composable
-fun PermissionItemRow(
-    title: String,
-    subtitle: String,
-    isGranted: Boolean,
-    actionLabel: String,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(30.dp)
-                .clip(CircleShape)
-                .background(
-                    if (isGranted) MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.errorContainer
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = if (isGranted) Icons.Default.Check else Icons.Default.Close,
-                contentDescription = null,
-                tint = if (isGranted) MaterialTheme.colorScheme.onPrimaryContainer
-                else MaterialTheme.colorScheme.onErrorContainer,
-                modifier = Modifier.size(16.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.width(10.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp
-                )
-            )
-        }
-
-        if (!isGranted) {
-            Spacer(modifier = Modifier.width(8.dp))
-            OutlinedButton(
-                onClick = onClick,
-                shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                modifier = Modifier.height(30.dp)
-            ) {
-                Text(
-                    text = actionLabel,
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold
-                    )
-                )
-            }
-        }
-    }
-}
-
-@Composable
 fun WakeUpSettingsSection(
-    config: com.example.data.AppConfig,
+    config: AppConfig,
     onUpdateFourFinger: (Boolean) -> Unit,
     onUpdatePowerKey: (Boolean) -> Unit,
     onUpdateEmergencyTap: (Boolean) -> Unit,
-    onUpdateHaptic: (Boolean) -> Unit
+    onUpdateHaptic: (Boolean) -> Unit,
+    onUpdateCallWake: (Boolean) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -712,10 +1174,19 @@ fun WakeUpSettingsSection(
                 )
             }
 
+            // Modified per modification 4: Added call incoming auto wake
+            SettingToggleRow(
+                icon = Icons.Default.Call,
+                title = "通话呼入自动点亮屏幕",
+                desc = "通过原生非侵入式 监听系统音频通道，当检测到通话接入时，自动退出息屏并点亮屏幕。",
+                checked = config.callWake,
+                onCheckedChange = onUpdateCallWake
+            )
+
             SettingToggleRow(
                 icon = Icons.Default.TouchApp,
                 title = "四指触摸唤醒",
-                desc = "息屏期间所有触控完全阻断。任意四根手指同时贴在屏幕上即可解锁，符合人体工程学，防止误触游戏。",
+                desc = "息屏期间所有触控完全阻断。任意四根手指同时按在屏幕上即可解锁，防止误触游戏。",
                 checked = config.fourFingerWake,
                 onCheckedChange = onUpdateFourFinger
             )
@@ -723,7 +1194,7 @@ fun WakeUpSettingsSection(
             SettingToggleRow(
                 icon = Icons.Default.PowerSettingsNew,
                 title = "锁屏键 / 电源键开启",
-                desc = "按下机身侧边电源/锁屏键时立即退出挂机并恢复常规屏幕。与四指触摸并列生效、互不干扰。",
+                desc = "按下机身侧边电源/锁屏键时立即退出挂机并恢复屏幕。",
                 checked = config.powerKeyWake,
                 onCheckedChange = onUpdatePowerKey
             )
@@ -731,7 +1202,7 @@ fun WakeUpSettingsSection(
             SettingToggleRow(
                 icon = Icons.Default.DirectionsRun,
                 title = "应急五连击唤醒",
-                desc = "单手不便使用五指时，快速连续轻触屏幕 5 次亦可紧急恢复屏幕显示。",
+                desc = "单手不便使用四指时，快速连续轻触屏幕 5 次亦可紧急恢复屏幕显示。",
                 checked = config.emergencyTapWake,
                 onCheckedChange = onUpdateEmergencyTap
             )
@@ -749,7 +1220,7 @@ fun WakeUpSettingsSection(
 
 @Composable
 fun StandbyConfigSection(
-    config: com.example.data.AppConfig,
+    config: AppConfig,
     onUpdateDelay: (Int) -> Unit,
     onUpdateCpuLock: (Boolean) -> Unit,
     onUpdateOledPureBlack: (Boolean) -> Unit,
@@ -790,7 +1261,7 @@ fun StandbyConfigSection(
                     text = "启动延迟倒计时",
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 )
                 Spacer(modifier = Modifier.height(6.dp))
@@ -853,7 +1324,7 @@ fun SettingToggleRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(10.dp))
             .clickable { onCheckedChange(!checked) }
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -871,13 +1342,13 @@ fun SettingToggleRow(
                 text = title,
                 style = MaterialTheme.typography.bodyMedium.copy(
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             )
             Text(
                 text = desc,
                 style = MaterialTheme.typography.bodySmall.copy(
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp,
                     lineHeight = 15.sp
                 )
@@ -886,80 +1357,8 @@ fun SettingToggleRow(
         Spacer(modifier = Modifier.width(8.dp))
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                checkedTrackColor = MaterialTheme.colorScheme.primary
-            )
+            onCheckedChange = onCheckedChange
         )
-    }
-}
-
-@Composable
-fun OpenSourceAcknowledgmentCard(onOpenProject: () -> Unit) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .clickable { onOpenProject() }
-            .testTag("acknowledgment_card"),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Security,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "开源致谢 · 致敬原作者",
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                )
-                Text(
-                    text = "基于 JonasBernard/FakeStandby 开源项目",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 12.sp
-                    )
-                )
-                Text(
-                    text = "点击在默认浏览器中打开原项目主页",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        fontSize = 11.sp
-                    )
-                )
-            }
-            Icon(
-                imageVector = Icons.Default.DirectionsRun,
-                contentDescription = "Open link",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(16.dp)
-            )
-        }
     }
 }
 
@@ -989,7 +1388,7 @@ private fun requestBatteryOptimizationExemption(context: Context) {
         }
         context.startActivity(intent)
     } catch (e: Exception) {
-        Toast.makeText(context, "请在「设置 - 应用程序 - FakeStandby - 电池」中选择「无限制」", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, "请在「设置 - 应用 - FakeStandby - 电池」中选择「无限制」", Toast.LENGTH_LONG).show()
     }
 }
 
@@ -1006,22 +1405,34 @@ private fun requestDeviceAdminPermission(context: Context) {
     }
 }
 
-private fun isAccessibilityEnabled(context: Context): Boolean {
-    if (FakeStandbyAccessibilityService.isEnabled) return true
-    val enabledServices = Settings.Secure.getString(
-        context.contentResolver,
-        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-    ) ?: return false
-    val expected = ComponentName(context, FakeStandbyAccessibilityService::class.java).flattenToString()
-    return enabledServices.split(":").any { it.equals(expected, ignoreCase = true) }
+private fun openWirelessDebuggingSettings(context: Context) {
+    val intents = listOf(
+        // Direct intent to Wireless Debugging settings (Android 11+)
+        Intent("android.settings.WIRELESS_DEBUGGING_SETTINGS").apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        },
+        // Component intent for Samsung One UI & stock Android SubSettings
+        Intent().apply {
+            component = ComponentName("com.android.settings", "com.android.settings.SubSettings")
+            putExtra(":settings:show_fragment", "com.android.settings.development.WirelessDebuggingFragment")
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        },
+        // Developer settings fallback
+        Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        },
+        // General settings fallback
+        Intent(Settings.ACTION_SETTINGS).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+    )
+
+    for (intent in intents) {
+        try {
+            context.startActivity(intent)
+            return
+        } catch (_: Exception) {}
+    }
+    Toast.makeText(context, "无法自动打开，请手动前往系统设置 -> 开发者选项 -> 无线调试", Toast.LENGTH_LONG).show()
 }
 
-private fun requestAccessibilityPermission(context: Context) {
-    try {
-        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-        context.startActivity(intent)
-        Toast.makeText(context, "请在「已安装的应用程序」列表中开启 FakeStandby", Toast.LENGTH_LONG).show()
-    } catch (e: Exception) {
-        Toast.makeText(context, "无法直接打开无障碍设置，请在系统设置中手动开启", Toast.LENGTH_SHORT).show()
-    }
-}

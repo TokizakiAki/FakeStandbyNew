@@ -1,6 +1,7 @@
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
+  alias(libs.plugins.secrets)
 }
 
 android {
@@ -8,17 +9,18 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.fakestandby.zkrpx"
-    minSdk = 31 // Android 12+ minimum
+    applicationId = "com.aistudio.fakestandby.qpxrtd"
+    minSdk = 31
     targetSdk = 36
-    versionCode = 2
-    versionName = "2.1"
-
-    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    versionCode = 1
+    versionName = "1.0"
 
     ndk {
+      abiFilters.clear()
       abiFilters.add("arm64-v8a")
     }
+
+    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,
@@ -44,9 +46,13 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+      // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
+      // AI Studio.
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
+      // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
+      // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")
     }
   }
@@ -65,6 +71,17 @@ android {
   }
 }
 
+// Configure the Secrets Gradle Plugin to use .env and .env.example files
+// to match the convention used in Web projects.
+secrets {
+  propertiesFileName = ".env"
+  defaultPropertiesFileName = ".env.example"
+  ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
+}
+
+
+// Some unused dependencies are commented out below instead of being removed.
+// This makes it easy to add them back in the future if needed.
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
   implementation(libs.androidx.activity.compose)
@@ -80,6 +97,7 @@ dependencies {
   implementation(libs.androidx.lifecycle.viewmodel.compose)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
+  implementation(libs.kadb)
 
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
